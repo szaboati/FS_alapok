@@ -1,0 +1,166 @@
+<!doctype html><html lang="hu"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Windows fájlszerver komplex feladat - GUI, CMD és PowerShell</title>
+<style>
+:root{--ink:#172033;--muted:#596579;--blue:#1457a6;--pale:#eaf3ff;--line:#cad5e3;--code:#101827;}
+*{box-sizing:border-box} body{margin:0;font:16px/1.55 Arial,'DejaVu Sans',sans-serif;color:var(--ink);background:#f3f6fa}
+main{max-width:1050px;margin:auto;background:white;padding:44px 54px;box-shadow:0 0 30px #ccd5e0}
+h1{font-size:34px;line-height:1.15;color:#0d3d74;margin:0 0 10px} h2{color:#1457a6;border-bottom:2px solid #dbe8f7;padding-bottom:6px;margin-top:38px} h3{color:#234f7e;margin-top:25px}
+.lead{font-size:18px;color:var(--muted)} .box{background:var(--pale);border-left:5px solid var(--blue);padding:14px 18px;margin:16px 0} .warn{background:#fff5da;border-left-color:#d99000}
+pre{background:var(--code);color:#edf4ff;padding:16px;border-radius:7px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:13px/1.45 Consolas,'DejaVu Sans Mono',monospace}
+table{width:100%;border-collapse:collapse;margin:14px 0 24px;font-size:14px} th{background:#1457a6;color:white;text-align:left} th,td{border:1px solid var(--line);padding:8px;vertical-align:top} tbody tr:nth-child(even){background:#f5f8fc}
+.tree{font-family:Consolas,monospace;background:#f6f8fb;padding:16px;border:1px solid var(--line)} a{color:#1457a6} .pagebreak{break-before:page} .check li{margin:7px 0}
+@media(max-width:650px){main{padding:22px 18px}h1{font-size:27px}table{font-size:12px}}
+@media print{body{background:white;font-size:10pt}main{max-width:none;padding:0;box-shadow:none}h1{font-size:25pt}h2{font-size:17pt;break-after:avoid}h3{font-size:13pt;break-after:avoid}pre{font-size:7.4pt;break-inside:auto}table,.box{break-inside:avoid}@page{size:A4;margin:16mm 14mm 17mm}}
+</style></head><body><main>
+<h1>Windows fájlszerver komplex feladat - GUI, CMD és PowerShell</h1><p class="lead">Komplett, összehasonlító megoldás helyi felhasználókkal és csoporttal a <strong>FS</strong> Windows fájlszerveren.</p>
+<div class="box"><strong>Cél:</strong> az <code>m1</code> és <code>m2</code> felhasználó a <code>munkas</code> csoport tagjaként olvassa a közös feladatokat, saját mappájába írjon, egymás mappájához ne férjen hozzá. A <code>boss</code> feltölt, ellenőriz és archivál.</div>
+<h2>1. Feltételezések és mappaszerkezet</h2>
+<ul><li>Szerver: <strong>FS</strong></li><li>Fizikai út: <code>D:\Munka</code></li><li>Megosztás: <code>\FS\munka</code></li><li>Helyi fiókok: <code>m1</code>, <code>m2</code>, <code>boss</code></li><li>Helyi csoport: <code>munkas</code></li></ul>
+<div class="tree">D:\Munka<br>├── Kozos &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; boss ide tölti a feladatokat<br>├── Sajat<br>│&nbsp;&nbsp; ├── m1 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; csak m1 és boss<br>│&nbsp;&nbsp; └── m2 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; csak m2 és boss<br>└── Archiv<br>&nbsp;&nbsp;&nbsp; ├── m1<br>&nbsp;&nbsp;&nbsp; └── m2</div>
+<h2>2. Jogosultsági terv</h2>
+<h3>Megosztási jogosultság</h3><table><thead><tr><th>Név</th><th>Jog</th></tr></thead><tbody><tr><td>munkas</td><td>Módosítás</td></tr><tr><td>boss</td><td>Teljes hozzáférés</td></tr><tr><td>Administrators</td><td>Teljes hozzáférés</td></tr></tbody></table>
+<p>A munkásoknak megosztási szinten Módosítás kell, mert a saját mappájukba írnak. A tényleges korlátozást az NTFS-jogok végzik.</p>
+<h3>NTFS-jogosultság</h3><table><thead><tr><th>Mappa</th><th>munkas</th><th>m1</th><th>m2</th><th>boss</th></tr></thead><tbody><tr><td>Munka</td><td>Olvasás / bejárás</td><td>-</td><td>-</td><td>Teljes</td></tr><tr><td>Kozos</td><td>Olvasás</td><td>örökölt</td><td>örökölt</td><td>Teljes</td></tr><tr><td>Sajat</td><td>Mappabejárás</td><td>-</td><td>-</td><td>Teljes</td></tr><tr><td>Sajat\m1</td><td>nincs</td><td>Módosítás</td><td>nincs</td><td>Teljes</td></tr><tr><td>Sajat\m2</td><td>nincs</td><td>nincs</td><td>Módosítás</td><td>Teljes</td></tr><tr><td>Archiv</td><td>nincs</td><td>nincs</td><td>nincs</td><td>Teljes</td></tr></tbody></table>
+<div class="box warn"><strong>Fontos:</strong> ne használjunk szükségtelen explicit Megtagadás bejegyzést. Az engedély hiánya egyszerűbb és kevésbé okoz váratlan jogosultsági hibát.</div>
+<h2 class="pagebreak">3. GUI-megoldás</h2>
+<h3>3.1 Felhasználók és csoport</h3><ol><li><strong>Számítógép-kezelés → Helyi felhasználók és csoportok → Felhasználók</strong>.</li><li>Új felhasználóként hozza létre: <code>m1</code>, <code>m2</code>, <code>boss</code>.</li><li>A <strong>Csoportok</strong> alatt hozzon létre <code>munkas</code> nevű csoportot.</li><li>Adja hozzá az <code>m1</code> és <code>m2</code> fiókot.</li></ol>
+<h3>3.2 Mappák</h3><p>A Fájlkezelőben hozza létre a fenti teljes mappaszerkezetet.</p>
+<h3>3.3 Biztonsági jogosultságok</h3><ol><li>Mappa jobb gomb → <strong>Tulajdonságok → Biztonság → Speciális</strong>.</li><li>A védett mappákon válassza az <strong>Öröklés letiltása</strong> lehetőséget.</li><li>A saját mappák és az archívum esetén távolítsa el az örökölt jogosultságokat.</li><li>Adja hozzá a jogosultsági terv táblázatában szereplő fiókokat.</li><li>A <code>SYSTEM</code> és az <code>Administrators</code> minden védett mappán kapjon Teljes hozzáférést.</li></ol>
+<h3>3.4 Megosztás</h3><ol><li><code>D:\Munka</code> jobb gomb → <strong>Tulajdonságok → Megosztás → Speciális megosztás</strong>.</li><li>Jelölje be a <strong>Mappa megosztása</strong> opciót, név: <code>munka</code>.</li><li>Engedélyeknél törölje az <code>Everyone</code> bejegyzést.</li><li><code>munkas</code>: Módosítás; <code>boss</code> és <code>Administrators</code>: Teljes hozzáférés.</li></ol>
+<h2 class="pagebreak">4. CMD-megoldás</h2><p>Indítsa a Parancssort rendszergazdaként. A <code>*</code> biztonságosan bekéri a jelszót.</p><pre><code>:: Futtatás rendszergazdai Parancssorban
+net user m1 * /add
+net user m2 * /add
+net user boss * /add
+net localgroup munkas /add
+net localgroup munkas m1 /add
+net localgroup munkas m2 /add
+
+mkdir D:\Munka\Kozos
+mkdir D:\Munka\Sajat\m1
+mkdir D:\Munka\Sajat\m2
+mkdir D:\Munka\Archiv\m1
+mkdir D:\Munka\Archiv\m2
+
+icacls &quot;D:\Munka&quot; /inheritance:r
+icacls &quot;D:\Munka&quot; /grant:r &quot;SYSTEM:(OI)(CI)F&quot; &quot;*S-1-5-32-544:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\boss:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\munkas:RX&quot;
+
+icacls &quot;D:\Munka\Kozos&quot; /inheritance:r
+icacls &quot;D:\Munka\Kozos&quot; /grant:r &quot;SYSTEM:(OI)(CI)F&quot; &quot;*S-1-5-32-544:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\boss:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\munkas:(OI)(CI)RX&quot;
+
+icacls &quot;D:\Munka\Sajat&quot; /inheritance:r
+icacls &quot;D:\Munka\Sajat&quot; /grant:r &quot;SYSTEM:(OI)(CI)F&quot; &quot;*S-1-5-32-544:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\boss:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\munkas:RX&quot;
+
+icacls &quot;D:\Munka\Sajat\m1&quot; /inheritance:r
+icacls &quot;D:\Munka\Sajat\m1&quot; /grant:r &quot;SYSTEM:(OI)(CI)F&quot; &quot;*S-1-5-32-544:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\boss:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\m1:(OI)(CI)M&quot;
+
+icacls &quot;D:\Munka\Sajat\m2&quot; /inheritance:r
+icacls &quot;D:\Munka\Sajat\m2&quot; /grant:r &quot;SYSTEM:(OI)(CI)F&quot; &quot;*S-1-5-32-544:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\boss:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\m2:(OI)(CI)M&quot;
+
+icacls &quot;D:\Munka\Archiv&quot; /inheritance:r
+icacls &quot;D:\Munka\Archiv&quot; /grant:r &quot;SYSTEM:(OI)(CI)F&quot; &quot;*S-1-5-32-544:(OI)(CI)F&quot; &quot;%COMPUTERNAME%\boss:(OI)(CI)F&quot;
+
+net share munka=&quot;D:\Munka&quot; /grant:&quot;%COMPUTERNAME%\munkas&quot;,change /grant:&quot;%COMPUTERNAME%\boss&quot;,full</code></pre>
+<h3>Jelölések</h3><table><thead><tr><th>Jel</th><th>Jelentés</th></tr></thead><tbody><tr><td>F</td><td>Teljes hozzáférés</td></tr><tr><td>M</td><td>Módosítás</td></tr><tr><td>RX</td><td>Olvasás és végrehajtás</td></tr><tr><td>(OI)</td><td>Fájlokra öröklődik</td></tr><tr><td>(CI)</td><td>Almappákra öröklődik</td></tr><tr><td>/inheritance:r</td><td>Öröklés kikapcsolása, örökölt ACE-k eltávolítása</td></tr><tr><td>/grant:r</td><td>Explicit engedély cseréje</td></tr></tbody></table>
+<h2 class="pagebreak">5. Teljes PowerShell-megoldás</h2><p>A szkript Windows PowerShell 5.1 alatt, rendszergazdai jogosultsággal futtatható. Nem tárol nyílt szövegű jelszót.</p><pre><code># Futtatás rendszergazdai Windows PowerShell 5.1-ben
+$Root = &quot;D:\Munka&quot;
+$Computer = $env:COMPUTERNAME
+$BossAccount = &quot;$Computer\boss&quot;
+$WorkerGroup = &quot;$Computer\munkas&quot;
+$M1Account = &quot;$Computer\m1&quot;
+$M2Account = &quot;$Computer\m2&quot;
+
+# Jelszavak biztonságos bekérése
+$M1Password = Read-Host &quot;Az m1 jelszava&quot; -AsSecureString
+$M2Password = Read-Host &quot;Az m2 jelszava&quot; -AsSecureString
+$BossPassword = Read-Host &quot;A boss jelszava&quot; -AsSecureString
+
+# Helyi felhasználók
+if (-not (Get-LocalUser m1 -ErrorAction SilentlyContinue)) {
+  New-LocalUser -Name m1 -Password $M1Password -FullName &quot;Munkatárs 1&quot;
+}
+if (-not (Get-LocalUser m2 -ErrorAction SilentlyContinue)) {
+  New-LocalUser -Name m2 -Password $M2Password -FullName &quot;Munkatárs 2&quot;
+}
+if (-not (Get-LocalUser boss -ErrorAction SilentlyContinue)) {
+  New-LocalUser -Name boss -Password $BossPassword -FullName &quot;Ellenőrző vezető&quot;
+}
+
+# Csoport és tagság
+if (-not (Get-LocalGroup munkas -ErrorAction SilentlyContinue)) {
+  New-LocalGroup -Name munkas -Description &quot;A munka megosztás dolgozói&quot;
+}
+$members = (Get-LocalGroupMember munkas -ErrorAction SilentlyContinue).Name
+if ($members -notcontains &quot;$Computer\m1&quot;) { Add-LocalGroupMember munkas m1 }
+if ($members -notcontains &quot;$Computer\m2&quot;) { Add-LocalGroupMember munkas m2 }
+
+# Mappák
+$Folders = @(
+  $Root, &quot;$Root\Kozos&quot;, &quot;$Root\Sajat&quot;, &quot;$Root\Sajat\m1&quot;, &quot;$Root\Sajat\m2&quot;,
+  &quot;$Root\Archiv&quot;, &quot;$Root\Archiv\m1&quot;, &quot;$Root\Archiv\m2&quot;
+)
+$Folders | ForEach-Object { New-Item -Path $_ -ItemType Directory -Force | Out-Null }
+
+function Set-FolderPermissions {
+  param([string]$Path, [array]$Permissions)
+  $Acl = Get-Acl -LiteralPath $Path
+  $Acl.SetAccessRuleProtection($true, $false)
+  foreach ($Rule in @($Acl.Access)) { [void]$Acl.RemoveAccessRuleAll($Rule) }
+  foreach ($Permission in $Permissions) {
+    $Rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+      $Permission.Identity, $Permission.Rights,
+      &quot;ContainerInherit,ObjectInherit&quot;, &quot;None&quot;, &quot;Allow&quot;)
+    [void]$Acl.AddAccessRule($Rule)
+  }
+  Set-Acl -LiteralPath $Path -AclObject $Acl
+}
+
+$adminRules = @(
+  @{Identity=&quot;SYSTEM&quot;; Rights=&quot;FullControl&quot;},
+  @{Identity=&quot;BUILTIN\Administrators&quot;; Rights=&quot;FullControl&quot;},
+  @{Identity=$BossAccount; Rights=&quot;FullControl&quot;}
+)
+
+Set-FolderPermissions $Root ($adminRules + @{Identity=$WorkerGroup; Rights=&quot;ReadAndExecute&quot;})
+Set-FolderPermissions &quot;$Root\Kozos&quot; ($adminRules + @{Identity=$WorkerGroup; Rights=&quot;ReadAndExecute&quot;})
+Set-FolderPermissions &quot;$Root\Sajat&quot; ($adminRules + @{Identity=$WorkerGroup; Rights=&quot;ReadAndExecute&quot;})
+Set-FolderPermissions &quot;$Root\Sajat\m1&quot; ($adminRules + @{Identity=$M1Account; Rights=&quot;Modify&quot;})
+Set-FolderPermissions &quot;$Root\Sajat\m2&quot; ($adminRules + @{Identity=$M2Account; Rights=&quot;Modify&quot;})
+Set-FolderPermissions &quot;$Root\Archiv&quot; $adminRules
+Set-FolderPermissions &quot;$Root\Archiv\m1&quot; $adminRules
+Set-FolderPermissions &quot;$Root\Archiv\m2&quot; $adminRules
+
+# SMB-megosztás
+if (Get-SmbShare -Name munka -ErrorAction SilentlyContinue) {
+  Remove-SmbShare -Name munka -Force
+}
+New-SmbShare -Name munka -Path $Root `
+  -Description &quot;Közös munkaterület és személyes munkamappák&quot; `
+  -ChangeAccess $WorkerGroup `
+  -FullAccess $BossAccount,&quot;BUILTIN\Administrators&quot; `
+  -FolderEnumerationMode AccessBased
+
+Write-Host &quot;Elkészült: \\$Computer\munka&quot; -ForegroundColor Green</code></pre>
+<h2>6. Napi munkafolyamat és archiválás</h2><ol><li><strong>boss:</strong> feltölti a feladatot a <code>\FS\munka\Kozos</code> mappába.</li><li><strong>m1:</strong> a fájlt a <code>\FS\munka\Sajat\m1</code> helyre menti.</li><li><strong>m2:</strong> a fájlt a <code>\FS\munka\Sajat\m2</code> helyre menti.</li><li><strong>boss:</strong> ellenőrzés után az <code>Archiv\m1</code> vagy <code>Archiv\m2</code> mappába helyezi.</li></ol>
+<h3>Archiválás CMD-ből</h3><pre><code>robocopy &quot;D:\Munka\Sajat\m1&quot; &quot;D:\Munka\Archiv\m1&quot; /E /MOVE
+robocopy &quot;D:\Munka\Sajat\m2&quot; &quot;D:\Munka\Archiv\m2&quot; /E /MOVE</code></pre>
+<h3>Dátum szerinti archiválás PowerShellből</h3><pre><code>$Date = Get-Date -Format &quot;yyyy-MM-dd&quot;
+foreach ($User in &#x27;m1&#x27;,&#x27;m2&#x27;) {
+  $Source = &quot;D:\Munka\Sajat\$User&quot;
+  $Destination = &quot;D:\Munka\Archiv\$User\$Date&quot;
+  New-Item $Destination -ItemType Directory -Force | Out-Null
+  Copy-Item &quot;$Source\*&quot; $Destination -Recurse -Force
+}
+# Ellenőrzés után a forrásfájlok törölhetők.</code></pre>
+<h2>7. Ellenőrzési terv</h2><p>Másik felhasználó tesztje előtt bontsa a korábbi kapcsolatokat: <code>net use * /delete</code>.</p>
+<h3>m1 teszt</h3><pre><code>net use Z: \\FS\munka /user:FS\m1 *
+dir Z:\Kozos
+dir Z:\Sajat\m1
+dir Z:\Sajat\m2
+dir Z:\Archiv</code></pre>
+<ul class="check"><li>✓ Közös fájlok olvashatók, de nem módosíthatók.</li><li>✓ Saját <code>m1</code> mappában létrehozás, módosítás és törlés működik.</li><li>✓ <code>m2</code> és <code>Archiv</code> nem érhető el.</li></ul>
+<h3>m2 teszt</h3><p>Ugyanez <code>/user:FS\m2</code> hitelesítéssel; csak a <code>Sajat\m2</code> legyen írható.</p>
+<h3>boss teszt</h3><p>A <code>boss</code> írjon a Közös mappába, nyissa meg mindkét saját mappát, majd másoljon az Archiv mappába.</p>
+<h2>8. A három módszer összevetése</h2><table><thead><tr><th>Szempont</th><th>GUI</th><th>CMD</th><th>PowerShell</th></tr></thead><tbody><tr><td>Tanulhatóság</td><td>Könnyű</td><td>Közepes</td><td>Közepes/nehezebb</td></tr><tr><td>Ismételhetőség</td><td>Gyenge</td><td>Jó</td><td>Kiváló</td></tr><tr><td>Automatizálás</td><td>Nincs</td><td>Részleges</td><td>Teljes</td></tr><tr><td>Hibakockázat</td><td>Kézi kattintás</td><td>Elgépelés</td><td>Szkriptben ellenőrizhető</td></tr><tr><td>Ajánlott</td><td>Bemutatás</td><td>Labor, gyors telepítés</td><td>Éles és ismétlődő telepítés</td></tr></tbody></table>
+<h2>9. Hibakeresés</h2><ul><li><strong>Hozzáférés megtagadva:</strong> ellenőrizze külön a megosztási és az NTFS-jogokat.</li><li><strong>Másik fiókkal sem kér jelszót:</strong> <code>net use * /delete</code>, majd újracsatlakozás.</li><li><strong>A munkás látja a másik mappát:</strong> ellenőrizze az öröklést, valamint az <code>Authenticated Users</code> és <code>Users</code> bejegyzéseket.</li><li><strong>Helyi csoportnév nyelvi hiba:</strong> CMD-ben az Administrators SID-je <code>S-1-5-32-544</code>; PowerShellben a beépített csoport feloldását ellenőrizni kell lokalizált rendszeren.</li></ul>
+<h2>10. Források</h2><ul><li><a href="https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/icacls">Microsoft Learn - icacls</a></li><li><a href="https://learn.microsoft.com/en-us/powershell/module/smbshare/new-smbshare">Microsoft Learn - New-SmbShare</a></li><li><a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-acl">Microsoft Learn - Set-Acl</a></li></ul>
+<p class="lead"><strong>Ajánlás:</strong> a kialakítást GUI-val érdemes bemutatni, az ismételhető végrehajtást pedig PowerShell-szkripttel elvégezni.</p>
+</main></body></html>
